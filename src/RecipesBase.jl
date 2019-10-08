@@ -12,9 +12,8 @@ export
     AbstractLayout
 
 # Common abstract types for the Plots ecosystem
-abstract type AbstractBackend end
-abstract type AbstractPlot{T<:AbstractBackend} end
-abstract type AbstractLayout end
+abstract type AbstractPlot{T} end
+abstract type AbstractLayout end # we will have to ignore layouts in this package.
 
 # a placeholder to establish the name so that other packages (Plots.jl for example)
 # can add their own definition of RecipesBase.plot since RecipesBase is the common
@@ -36,14 +35,14 @@ function is_key_supported end
 # can add their own definition of RecipesBase.group_as_matrix(t)
 group_as_matrix(t) = false
 
-# This holds the recipe definitions to be dispatched on
-# the function takes in an attribute dict `d` and a list of args.
-# This default definition specifies the "no-arg" case.
-apply_recipe(plotattributes::Dict{Symbol,Any}) = ()
+# # This holds the recipe definitions to be dispatched on
+# # the function takes in an attribute dict `d` and a list of args.
+# # This default definition specifies the "no-arg" case.
+# apply_recipe(plotattributes::Dict{Symbol,Any}) = ()
 
-const _debug_recipes = Bool[false]
+const _debug_recipes = Ref(false)
 function debug(v::Bool = true)
-    _debug_recipes[1] = v
+    _debug_recipes[] = v
 end
 
 # --------------------------------------------------------------------------
@@ -99,7 +98,7 @@ end
 
 function create_kw_body(func_signature::Expr)
     # get the arg list, stripping out any keyword parameters into a
-    # bunch of get!(kw, key, value) lines
+    # bunch of variable assignments
     func_signature.head == :where && return create_kw_body(func_signature.args[1])
     args = func_signature.args[2:end]
     kw_body = Expr(:block)
@@ -112,7 +111,7 @@ function create_kw_body(func_signature::Expr)
                 @warn("Type annotations on keyword arguments not currently supported in recipes. Type information has been discarded")
             end
             push!(kw_body.args, :($k = get!(plotattributes, $(QuoteNode(k)), $v)))
-            push!(cleanup_body.args, :(RecipesBase.is_key_supported($(QuoteNode(k))) || delete!(plotattributes, $(QuoteNode(k)))))
+#             push!(cleanup_body.args, :(RecipesBase.is_key_supported($(QuoteNode(k))) || delete!(plotattributes, $(QuoteNode(k)))))
         end
         args = args[2:end]
     end
@@ -422,3 +421,22 @@ end
 
 
 end # module
+
+# Here's the idea;
+
+# Building off of the RecipesBase.jl framework, allow the macro to define argument conversions and plot functions.  
+# Iff it's a series type of invocation, define the plot type and the convert_arguments overloads; 
+# if it dispatches on a type, then define a plottype based on the seriestype's value - 
+# if seriestype occurs in the AST, then define `plottype(type_of_arg)` 
+# else do nothing, so the plottype is `lines` (the default). 
+
+# Now, what we also need to do is lift on all the kwargs in the beginning, and parse series macros.  
+# What we can do with that is create a plotting list, which we'll execute after the recipe is finished.
+# I'm not sure how that would work without some changes to the AbstractPlotting @recipe macro, though, and these two will conflict.
+# Perhaps we can make AbstractPlotting dep on RecipesBase, and require that to be compatible with Makie 
+# you need to qualify your recipes with RecipesBase.@recipe?
+
+# As for layouting, and multiple toplevel series from a single plot command, I don't know how we'll get those, **unless** we 
+# are able to decompose inside the plot(parent, ...) call.  Then we can just plot to the parent of the series, and get the 
+# colours from the AbstractPlotting palette?  We could also do the legend based on the flattened deps, and have a label field in 
+# the plot.  Not sure how that will work with nested Scenes, since they're expressed as `Combined`...but that seems solvable.
